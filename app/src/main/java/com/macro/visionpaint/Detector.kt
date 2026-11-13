@@ -108,6 +108,71 @@ class Detector(private val scale: Float) {
         return found
     }
 
+    /**
+     * Rastreio: procura de novo cada alvo de [prev] (achados no quadro anterior) só na região ao
+     * redor de onde ele estava. É muito mais rápido que [detect], que varre a tela inteira, e
+     * deixa a pintura acompanhar o alvo enquanto ele se move.
+     *
+     * Devolve null se algum alvo não foi achado perto da posição antiga (sumiu, andou demais ou
+     * dois rastreios se juntaram): aí quem chama faz uma varredura completa com [detect].
+     * Só segue o que já era conhecido; alvos novos só aparecem numa varredura completa.
+     */
+    fun track(frame: Mat, threshold: Float, prev: List<Target>): List<Target>? {
+        if (prev.isEmpty()) return null
+        val inv = 1f / scale
+        val out = ArrayList<Target>(prev.size)
+        val xs = ArrayList<Int>(prev.size)
+        val ys = ArrayList<Int>(prev.size)
+        val res = Mat()
+        try {
+            for (p in prev) {
+                val k = ids.indexOf(p.tplId)
+                if (k < 0) return null
+                val tpl = templates[k]
+                val px = (p.rect.left * scale).toInt()
+                val py = (p.rect.top * scale).toInt()
+                val r = TrackMath.roi(px, py, tpl.cols(), tpl.rows(), frame.cols(), frame.rows())
+                    ?: return null
+
+                val region = frame.submat(r[1], r[3], r[0], r[2])
+                try {
+                    Imgproc.matchTemplate(region, tpl, res, Imgproc.TM_CCOEFF_NORMED)
+                } finally {
+                    region.release()
+                }
+                val mm = Core.minMaxLoc(res)
+                if (mm.maxVal.isNaN() || mm.maxVal < threshold) return null
+
+                val x = r[0] + mm.maxLoc.x.toInt()
+                val y = r[1] + mm.maxLoc.y.toInt()
+                for (i in out.indices) {
+                    if (out[i].tplId == p.tplId &&
+                        TrackMath.sameSpot(xs[i], ys[i], x, y, tpl.cols(), tpl.rows())
+                    ) {
+                        return null
+                    }
+                }
+                xs.add(x)
+                ys.add(y)
+                out.add(
+                    Target(
+                        Rect(
+                            (x * inv).toInt(),
+                            (y * inv).toInt(),
+                            ((x + tpl.cols()) * inv).toInt(),
+                            ((y + tpl.rows()) * inv).toInt()
+                        ),
+                        mm.maxVal.toFloat(),
+                        p.tplId
+                    )
+                )
+            }
+        } finally {
+            res.release()
+        }
+        return out
+    }
+
     fun release() {
         templates.forEach { it.release() }
         templates.clear()

@@ -57,6 +57,9 @@ class CaptureService : Service() {
         /** true enquanto o macro está pausado pela bolinha flutuante. */
         @Volatile
         var paused = false
+
+        /** Intervalo mínimo entre varreduras completas enquanto há alvos sendo rastreados. */
+        private const val MIN_FULL_SCAN_MS = 500L
     }
 
     private val main = Handler(Looper.getMainLooper())
@@ -93,6 +96,12 @@ class CaptureService : Service() {
     private var scale = 0.5f
     private var lastProcess = 0L
     private var stopping = false
+
+    // Rastreio dos alvos (só a thread da análise mexe nestes): entre duas varreduras completas,
+    // procura os alvos já achados só ao redor de onde estavam, o que é bem mais rápido.
+    private var lastFound: List<Target> = emptyList()
+    private var lastFullScan = 0L
+    private var lastFullMs = 0L
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -336,7 +345,10 @@ class CaptureService : Service() {
             val now = SystemClock.uptimeMillis()
             if (now - lastProcess < 60) return
             lastProcess = now
-            if (paused) return
+            if (paused) {
+                lastFound = emptyList()
+                return
+            }
 
             val det = detector ?: return
             val plane = image.planes[0]
@@ -358,7 +370,25 @@ class CaptureService : Service() {
             cropped.release()
             rgba.release()
 
-            val targets = det.detect(rgb, MacroSettings.threshold)
+            val threshold = MacroSettings.threshold
+
+            // Varredura completa só de tempos em tempos (ou quando o rastreio perde um alvo): ela
+            // é lenta e, enquanto roda, a pintura fica parada. O intervalo cresce junto com o
+            // tempo que a varredura leva, para ela ocupar no máximo uns 25% do tempo.
+            val fullInterval = max(MIN_FULL_SCAN_MS, 3 * lastFullMs)
+            val tracked = if (lastFound.isNotEmpty() && now - lastFullScan < fullInterval) {
+                det.track(rgb, threshold, lastFound)
+            } else {
+                null
+            }
+            val targets = tracked ?: run {
+                val t0 = SystemClock.uptimeMillis()
+                val all = det.detect(rgb, threshold)
+                lastFullScan = SystemClock.uptimeMillis()
+                lastFullMs = lastFullScan - t0
+                all
+            }
+            lastFound = targets
             rgb.release()
             publish(targets)
         } catch (e: Throwable) {

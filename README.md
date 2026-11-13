@@ -28,6 +28,19 @@ Alternativa: abrir esta pasta no Android Studio e usar Build > Build APK.
 5. **INICIAR**, autorize o compartilhamento de tela e abra o app/jogo.
    Para parar, use o botão **Parar** da notificação ou o botão PARAR do app.
 
+## Versão 1.3.2: pintura acompanha o alvo durante o arrasto
+
+- **Corrigido:** durante o arrasto automático a pintura vermelha ficava parada no lugar antigo do
+  alvo até o arrasto terminar. A causa era a detecção lenta: a cada quadro o app procurava as
+  imagens na tela inteira, e isso demorava mais que o próprio arrasto.
+- Agora, depois de achar um alvo, o app o **rastreia**: procura de novo só na região ao redor
+  de onde ele estava (`Detector.track`, `TrackMath.kt`), o que é bem mais rápido. Se o rastreio
+  perde o alvo, ele volta na hora para a busca na tela inteira.
+- A busca na tela inteira continua rodando de tempos em tempos (no mínimo a cada 0,5 s e, se for
+  lenta, a cada 3x o tempo que ela leva) para achar alvos novos. Um alvo novo pode demorar um
+  pouco mais para ser pintado enquanto outro está sendo rastreado.
+- Se ainda ficar lento: em **Qualidade da captura**, diminua o valor (vale ao iniciar).
+
 ## Versão 1.3.1: correção do toque
 
 - **Corrigido:** com o macro rodando (principalmente no modo mira) não dava para tocar nem
