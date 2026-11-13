@@ -65,12 +65,15 @@ class OverlayView(context: Context) : View(context) {
 
     override fun onDraw(canvas: Canvas) {
         val half = stroke.strokeWidth / 2f
+        // A janela inteira é translúcida (ver TouchSafe): reforça o preenchimento na mesma
+        // proporção para a pintura manter a opacidade escolhida (até o máximo que a janela dá).
+        val boost = 1f / TouchSafe.PAINT_WINDOW_ALPHA
 
         // Pintura translúcida por cima de cada alvo + contorno sólido, cada um na sua cor.
         for (p in items) {
             val r = p.target.rect
             fill.color = p.color
-            fill.alpha = alphaPct * 255 / 100
+            fill.alpha = (alphaPct * 255 / 100 * boost).toInt().coerceAtMost(255)
             stroke.color = p.color
             canvas.drawRect(
                 r.left.toFloat(), r.top.toFloat(), r.right.toFloat(), r.bottom.toFloat(), fill
@@ -90,6 +93,21 @@ class OverlayView(context: Context) : View(context) {
             canvas.drawCircle(rt.target.cx, rt.target.cy, 5f * d, ring)
         }
     }
+}
+
+/**
+ * Android 12+ bloqueia os toques que passam por camadas de outro app quando a opacidade somada
+ * delas passa de 0,8 (proteção contra "tapjacking"). Só conta a opacidade da JANELA
+ * (WindowManager.LayoutParams.alpha), não o que está desenhado nela: uma camada de tela cheia
+ * transparente, mas com alpha 1,0, ainda bloqueia o toque no app de baixo.
+ *
+ * As duas camadas de tela cheia (pintura e marcadores da mira) usam os valores abaixo:
+ * 1 - (1 - 0,55) * (1 - 0,35) = 0,71, abaixo do limite. O desenho de cada uma é reforçado na
+ * mesma proporção (1 / alpha da janela) para continuar com a mesma aparência.
+ */
+object TouchSafe {
+    const val PAINT_WINDOW_ALPHA = 0.55f
+    const val MARKER_WINDOW_ALPHA = 0.35f
 }
 
 /** Tamanho real da tela (muda quando o aparelho gira). */

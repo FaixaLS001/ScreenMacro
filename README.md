@@ -28,6 +28,18 @@ Alternativa: abrir esta pasta no Android Studio e usar Build > Build APK.
 5. **INICIAR**, autorize o compartilhamento de tela e abra o app/jogo.
    Para parar, use o botão **Parar** da notificação ou o botão PARAR do app.
 
+## Versão 1.3.1: correção do toque
+
+- **Corrigido:** com o macro rodando (principalmente no modo mira) não dava para tocar nem
+  arrastar a tela; só a bolinha e as notificações respondiam. O Android 12+ bloqueia o toque que
+  passa por camadas de tela cheia de outro app quando a opacidade da janela delas passa de 0,8.
+  As duas camadas (pintura e marcadores da mira) agora usam opacidade de janela menor
+  (`TouchSafe` em `OverlayView.kt`) e o desenho é reforçado para continuar com a mesma aparência.
+- Efeito colateral: a pintura não passa de uns 55% de opacidade e os marcadores ficam um pouco
+  mais fracos em uso. Ao posicionar um marcador ele continua totalmente visível.
+- Se o toque ainda não passar: use **Pausar** na bolinha para testar, e confira se o arrasto
+  automático (modo mira) não está "tocando" sozinho por cima do seu dedo.
+
 ## Novidades da versão 1.3: visual novo
 
 - **Tema claro e escuro** automático, seguindo o do celular (cores em `res/values` e `res/values-night`).

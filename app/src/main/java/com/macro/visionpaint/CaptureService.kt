@@ -238,6 +238,8 @@ class CaptureService : Service() {
             PixelFormat.TRANSLUCENT
         )
         lp.gravity = Gravity.TOP or Gravity.START
+        // Sem isso o Android 12+ bloqueia os toques no app de baixo (ver TouchSafe).
+        lp.alpha = TouchSafe.PAINT_WINDOW_ALPHA
         if (Build.VERSION.SDK_INT >= 28) {
             lp.layoutInDisplayCutoutMode =
                 WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES

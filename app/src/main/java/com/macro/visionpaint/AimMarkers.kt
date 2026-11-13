@@ -73,6 +73,8 @@ class AimMarkers(private val ctx: Context) {
             PixelFormat.TRANSLUCENT
         )
         l.gravity = Gravity.TOP or Gravity.START
+        // Sem isso o Android 12+ bloqueia os toques no app de baixo (ver TouchSafe).
+        l.alpha = TouchSafe.MARKER_WINDOW_ALPHA
         if (Build.VERSION.SDK_INT >= 28) {
             l.layoutInDisplayCutoutMode =
                 WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
@@ -150,6 +152,9 @@ class AimMarkers(private val ctx: Context) {
         } else {
             l.flags or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
         }
+        // Posicionando, a camada recebe os toques (nada passa por ela): pode ficar opaca.
+        // Em uso, os toques passam para o app de baixo: precisa ficar translúcida.
+        l.alpha = if (touchable) 1f else TouchSafe.MARKER_WINDOW_ALPHA
         try {
             wm.updateViewLayout(v, l)
         } catch (e: Exception) {
@@ -177,6 +182,9 @@ class AimMarkers(private val ctx: Context) {
         private val amber = Color.parseColor("#FFC107")
         private val green = Color.parseColor("#43A047")
 
+        /** Reforço do desenho para compensar a janela translúcida (1 = janela opaca). */
+        private var boost = 1f
+
         override fun onDraw(c: Canvas) {
             // Tamanho real da tela: é nele que o macro calcula onde arrastar, então os
             // marcadores usam o mesmo, e não o tamanho desta camada.
@@ -184,6 +192,8 @@ class AimMarkers(private val ctx: Context) {
             val w = real.first.toFloat()
             val h = real.second.toFloat()
             val p = placing
+            // Posicionando a janela é opaca; em uso é translúcida (ver TouchSafe).
+            boost = if (p == NONE) 1f / TouchSafe.MARKER_WINDOW_ALPHA else 1f
             // Sem posicionar, vale o que está salvo (os sliders da tela principal podem ter mudado).
             if (p == NONE) loadPositions()
 
@@ -219,7 +229,7 @@ class AimMarkers(private val ctx: Context) {
             }
         }
 
-        private fun alphaOf(a: Float) = (a.coerceIn(0f, 1f) * 255f).toInt()
+        private fun alphaOf(a: Float) = ((a * boost).coerceIn(0f, 1f) * 255f).toInt()
 
         /** Linhas finas cruzando a tela inteira, para dar para alinhar mesmo com o dedo por cima. */
         private fun guides(c: Canvas, x: Float, y: Float, w: Float, h: Float) {
