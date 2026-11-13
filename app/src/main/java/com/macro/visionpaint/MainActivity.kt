@@ -3,8 +3,12 @@ package com.macro.visionpaint
 import android.Manifest
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.content.res.ColorStateList
+import android.content.res.Configuration
 import android.graphics.Color
 import android.graphics.Typeface
+import android.graphics.drawable.GradientDrawable
+import android.graphics.drawable.RippleDrawable
 import android.media.projection.MediaProjectionManager
 import android.net.Uri
 import android.os.Build
@@ -29,12 +33,23 @@ import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.appcompat.widget.SwitchCompat
 import androidx.core.content.ContextCompat
+import androidx.core.graphics.ColorUtils
+import androidx.core.view.WindowCompat
+
+private const val MATCH = ViewGroup.LayoutParams.MATCH_PARENT
+private const val WRAP = ViewGroup.LayoutParams.WRAP_CONTENT
 
 class MainActivity : AppCompatActivity() {
+
+    /** Estilos de botão: cheio (principal), suave (secundário), perigo (suave vermelho) e parar (cheio vermelho). */
+    private enum class Kind { PRIMARY, TONAL, DANGER, STOP }
 
     private lateinit var tvTemplates: TextView
     private lateinit var tvOverlay: TextView
     private lateinit var tvAccess: TextView
+    private lateinit var tvStatus: TextView
+    private lateinit var tvStatusSub: TextView
+    private lateinit var statusDot: View
     private lateinit var btnStart: Button
     private lateinit var swatch: View
     private lateinit var swDrag: SwitchCompat
@@ -78,6 +93,7 @@ class MainActivity : AppCompatActivity() {
         MacroSettings.init(this)
         TemplateStore.init(this)
         setContentView(buildUi())
+        applyBarStyle()
 
         if (Build.VERSION.SDK_INT >= 33 &&
             ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS)
@@ -92,42 +108,59 @@ class MainActivity : AppCompatActivity() {
         refresh()
     }
 
+    /** Ícones da barra de status e de navegação escuros no tema claro e claros no escuro. */
+    private fun applyBarStyle() {
+        val night = (resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK) ==
+            Configuration.UI_MODE_NIGHT_YES
+        val controller = WindowCompat.getInsetsController(window, window.decorView)
+        controller?.isAppearanceLightStatusBars = !night
+        controller?.isAppearanceLightNavigationBars = !night
+    }
+
     // ------------------------------------------------------------------ interface
 
     private fun buildUi(): View {
-        val root = LinearLayout(this).apply {
+        val page = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(dp(16), dp(16), dp(16), dp(32))
+            setBackgroundColor(themeColor(R.color.vp_bg))
         }
+        page.addView(header())
 
-        root.addView(heading("Vision Paint Macro", 22f))
-        root.addView(
-            text(
+        val content = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(16), dp(4), dp(16), dp(20))
+        }
+        content.addView(
+            note(
                 "Envie imagens de referência. Quando uma delas aparecer na tela, " +
                     "o app pinta o local e (se ligado) arrasta o dedo até ela ou leva a mira " +
                     "do jogo até o centro dela (modo mira)."
-            )
+            ),
+            lp(0)
         )
 
         // 1) Permissões
-        root.addView(heading("1. Permissões", 17f))
-        tvOverlay = text("")
-        root.addView(tvOverlay)
-        root.addView(button("Permitir sobreposição na tela") {
-            startActivity(
-                Intent(
-                    AndroidSettings.ACTION_MANAGE_OVERLAY_PERMISSION,
-                    Uri.parse("package:$packageName")
+        val c1 = card(1, "Permissões")
+        content.addView(c1)
+        tvOverlay = chip()
+        c1.addView(
+            permRow("Sobreposição na tela", tvOverlay, "Permitir sobreposição na tela") {
+                startActivity(
+                    Intent(
+                        AndroidSettings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                        Uri.parse("package:$packageName")
+                    )
                 )
-            )
-        })
-        tvAccess = text("")
-        root.addView(tvAccess)
-        root.addView(button("Ativar serviço de acessibilidade") {
-            startActivity(Intent(AndroidSettings.ACTION_ACCESSIBILITY_SETTINGS))
-        })
-        root.addView(
-            text(
+            }
+        )
+        tvAccess = chip()
+        c1.addView(
+            permRow("Acessibilidade (só para o arrasto)", tvAccess, "Ativar serviço de acessibilidade") {
+                startActivity(Intent(AndroidSettings.ACTION_ACCESSIBILITY_SETTINGS))
+            }
+        )
+        c1.addView(
+            note(
                 "Se o Android bloquear a ativação (app instalado fora da loja): " +
                     "Configurações > Apps > Vision Paint Macro > menu ⋮ > " +
                     "\"Permitir configurações restritas\"."
@@ -135,17 +168,18 @@ class MainActivity : AppCompatActivity() {
         )
 
         // 2) Imagens
-        root.addView(heading("2. Imagens de referência", 17f))
-        tvTemplates = text("")
-        root.addView(tvTemplates)
+        val c2 = card(2, "Imagens de referência")
+        content.addView(c2)
+        tvTemplates = note("")
+        c2.addView(tvTemplates)
         rowsBox = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-        root.addView(rowsBox)
-        root.addView(button("Adicionar imagens") {
+        c2.addView(rowsBox)
+        c2.addView(button("Adicionar imagens", Kind.PRIMARY) {
             pickImages.launch(arrayOf("image/*"))
-        })
-        root.addView(button("Apagar todas as imagens") { confirmClear() })
-        root.addView(
-            text(
+        }, lp(8))
+        c2.addView(button("Apagar todas as imagens", Kind.DANGER) { confirmClear() }, lp(8))
+        c2.addView(
+            note(
                 "Toque na cor para trocá-la só nessa imagem. \"Arrastar até ela\" liga o arrasto " +
                     "(ou a mira, no modo mira) apenas para ela. Use ↑ e ↓ para mudar a ordem da lista.\n" +
                     "Use recortes com detalhes (ícones, personagens). Cores lisas sem detalhe " +
@@ -154,47 +188,57 @@ class MainActivity : AppCompatActivity() {
         )
 
         // 3) Pintura
-        root.addView(heading("3. Cor padrão e pintura", 17f))
-        root.addView(text("A cor padrão vale para as imagens que não têm cor própria."))
+        val c3 = card(3, "Cor padrão e pintura")
+        content.addView(c3)
+        c3.addView(note("A cor padrão vale para as imagens que não têm cor própria."))
         swatch = View(this).apply {
-            layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(36))
-            setBackgroundColor(MacroSettings.color)
+            layoutParams = LinearLayout.LayoutParams(MATCH, dp(40)).apply {
+                topMargin = dp(4)
+                bottomMargin = dp(6)
+            }
+            background = rounded(MacroSettings.color, 12f, themeColor(R.color.vp_stroke))
         }
-        root.addView(swatch)
+        c3.addView(swatch)
         val c = MacroSettings.color
         val rgb = intArrayOf(Color.red(c), Color.green(c), Color.blue(c))
         val names = arrayOf("Vermelho", "Verde", "Azul")
+        val tints = intArrayOf(
+            Color.parseColor("#E5484D"),
+            Color.parseColor("#30A46C"),
+            Color.parseColor("#3E63DD")
+        )
         for (i in 0..2) {
-            root.addView(slider(names[i], 0, 255, rgb[i], "") { v ->
+            c3.addView(slider(names[i], 0, 255, rgb[i], "", tints[i]) { v ->
                 rgb[i] = v
                 val col = Color.rgb(rgb[0], rgb[1], rgb[2])
                 MacroSettings.color = col
-                swatch.setBackgroundColor(col)
+                swatch.background = rounded(col, 12f, themeColor(R.color.vp_stroke))
             })
         }
-        root.addView(slider("Opacidade da pintura", 15, 75, MacroSettings.paintAlphaPct, "%") {
+        c3.addView(slider("Opacidade da pintura", 15, 75, MacroSettings.paintAlphaPct, "%") {
             MacroSettings.paintAlphaPct = it
         })
-        root.addView(slider("Sensibilidade", 50, 98, (MacroSettings.threshold * 100).toInt(), "%") {
+        c3.addView(slider("Sensibilidade", 50, 98, (MacroSettings.threshold * 100).toInt(), "%") {
             MacroSettings.threshold = it / 100f
         })
-        root.addView(
+        c3.addView(
             slider("Qualidade da captura (vale ao iniciar)", 30, 100, MacroSettings.scalePct, "%") {
                 MacroSettings.scalePct = it
             }
         )
 
         // 4) Arrasto
-        root.addView(heading("4. Arrasto do dedo", 17f))
+        val c4 = card(4, "Arrasto do dedo")
+        content.addView(c4)
         swDrag = switch("Arrastar automaticamente até o alvo", MacroSettings.dragEnabled) {
             MacroSettings.dragEnabled = it
         }
-        root.addView(swDrag)
-        root.addView(switch("Mostrar a rota na tela", MacroSettings.showRoute) {
+        c4.addView(swDrag)
+        c4.addView(switch("Mostrar a rota na tela", MacroSettings.showRoute) {
             MacroSettings.showRoute = it
         })
 
-        root.addView(text("Qual alvo seguir (entre as imagens com \"Arrastar até ela\"):"))
+        c4.addView(note("Qual alvo seguir (entre as imagens com \"Arrastar até ela\"):"), lp(6))
         val modes = arrayOf(
             "Mais perto do ponto de partida",
             "Maior nota (o mais parecido com a imagem)",
@@ -206,6 +250,10 @@ class MainActivity : AppCompatActivity() {
                 text = modes[i]
                 id = View.generateViewId()
                 tag = i
+                textSize = 14f
+                setTextColor(themeColor(R.color.vp_text))
+                buttonTintList = ColorStateList.valueOf(themeColor(R.color.vp_accent))
+                setPadding(dp(8), dp(8), dp(8), dp(8))
             }
             group.addView(rb)
             if (i == MacroSettings.targetMode) group.check(rb.id)
@@ -214,39 +262,41 @@ class MainActivity : AppCompatActivity() {
             val rb = g.findViewById<RadioButton>(checkedId)
             if (rb != null) MacroSettings.targetMode = rb.tag as Int
         }
-        root.addView(group)
+        c4.addView(group)
 
-        root.addView(
-            text(
+        c4.addView(
+            note(
                 "Ponto de partida = onde o dedo pressiona para arrastar. Também dá para " +
                     "marcá-lo direto na tela: bolinha > Painel de mira > 1 Toque."
-            )
+            ),
+            lp(6)
         )
-        root.addView(
+        c4.addView(
             positionSlider("Ponto de partida - horizontal", { MacroSettings.originXPct }) {
                 MacroSettings.originXPct = it
             }
         )
-        root.addView(
+        c4.addView(
             positionSlider("Ponto de partida - vertical", { MacroSettings.originYPct }) {
                 MacroSettings.originYPct = it
             }
         )
-        root.addView(slider("Velocidade do arrasto", 300, 6000, MacroSettings.dragSpeed, " px/s") {
+        c4.addView(slider("Velocidade do arrasto", 300, 6000, MacroSettings.dragSpeed, " px/s") {
             MacroSettings.dragSpeed = it
         })
-        root.addView(slider("Pausa entre arrastos", 0, 3000, MacroSettings.cooldownMs, " ms") {
+        c4.addView(slider("Pausa entre arrastos", 0, 3000, MacroSettings.cooldownMs, " ms") {
             MacroSettings.cooldownMs = it
         })
 
         // 5) Modo mira
-        root.addView(heading("5. Modo mira (travar a mira na imagem)", 17f))
+        val c5 = card(5, "Modo mira (travar a mira na imagem)")
+        content.addView(c5)
         swAim = switch("Modo mira: levar a mira até o centro da imagem", MacroSettings.aimMode) {
             MacroSettings.aimMode = it
         }
-        root.addView(swAim)
-        root.addView(
-            text(
+        c5.addView(swAim)
+        c5.addView(
+            note(
                 "Em vez de arrastar até a imagem, o app arrasta o dedo a partir do ponto de " +
                     "partida para empurrar a mira do jogo até o centro da imagem, corrigindo em " +
                     "passos até ela ficar fixa. Precisa de \"Arrastar automaticamente\" ligado e " +
@@ -258,71 +308,72 @@ class MainActivity : AppCompatActivity() {
                     "Travar: liga/desliga o modo mira."
             )
         )
-        root.addView(
+        c5.addView(
             slider("Sensibilidade da mira", 10, 600, MacroSettings.aimGainPct, "%") {
                 MacroSettings.aimGainPct = it
             }
         )
-        root.addView(
-            text(
+        c5.addView(
+            note(
                 "Quanto o dedo anda para cada pixel de distância até a imagem. Se a mira passa " +
                     "do centro, baixe; se fica curta, suba. Com \"Aprender sozinho\" ligado, o app " +
                     "corrige esse valor medindo como o jogo responde."
             )
         )
-        root.addView(switch("Aprender a sensibilidade sozinho", MacroSettings.aimLearn) {
+        c5.addView(switch("Aprender a sensibilidade sozinho", MacroSettings.aimLearn) {
             MacroSettings.aimLearn = it
         })
-        root.addView(slider("Zona de travamento (raio)", 4, 80, MacroSettings.aimTolPx, " px") {
+        c5.addView(slider("Zona de travamento (raio)", 4, 80, MacroSettings.aimTolPx, " px") {
             MacroSettings.aimTolPx = it
         })
-        root.addView(
+        c5.addView(
             slider("Pausa entre correções", 0, 1000, MacroSettings.aimCooldownMs, " ms") {
                 MacroSettings.aimCooldownMs = it
             }
         )
-        root.addView(
+        c5.addView(
             slider("Arrasto mínimo", 0, 80, MacroSettings.aimMinTravelPx, " px") {
                 MacroSettings.aimMinTravelPx = it
             }
         )
-        root.addView(
-            text(
+        c5.addView(
+            note(
                 "Alguns jogos e navegadores ignoram arrastos muito curtos. Correções menores " +
                     "que o arrasto mínimo fazem o dedo ir além e voltar, terminando no mesmo " +
                     "lugar. Use 0 para desligar."
             )
         )
-        root.addView(switch("Inverter horizontal", MacroSettings.aimInvertX) {
+        c5.addView(switch("Inverter horizontal", MacroSettings.aimInvertX) {
             MacroSettings.aimInvertX = it
         })
-        root.addView(switch("Inverter vertical", MacroSettings.aimInvertY) {
+        c5.addView(switch("Inverter vertical", MacroSettings.aimInvertY) {
             MacroSettings.aimInvertY = it
         })
-        root.addView(
-            text("Se a mira se afasta da imagem em vez de chegar nela, ligue a inversão do eixo.")
+        c5.addView(
+            note("Se a mira se afasta da imagem em vez de chegar nela, ligue a inversão do eixo.")
         )
-        root.addView(
+        c5.addView(
             positionSlider("Posição da mira - horizontal", { MacroSettings.aimXPm / 10 }) {
                 MacroSettings.aimXPm = it * 10
             }
         )
-        root.addView(
+        c5.addView(
             positionSlider("Posição da mira - vertical", { MacroSettings.aimYPm / 10 }) {
                 MacroSettings.aimYPm = it * 10
             }
         )
-        root.addView(text("Mais fácil: marque a mira direto na tela, em Painel de mira > 2 Mira."))
+        c5.addView(note("Mais fácil: marque a mira direto na tela, em Painel de mira > 2 Mira."))
 
         // 6) Bolinha flutuante
-        root.addView(heading("6. Bolinha flutuante", 17f))
-        root.addView(
+        val c6 = card(6, "Bolinha flutuante")
+        content.addView(c6)
+        c6.addView(
             switch("Mostrar a bolinha durante o uso (vale ao iniciar)", MacroSettings.showBubble) {
                 MacroSettings.showBubble = it
             }
         )
-        root.addView(
-            text(
+        c6.addView(
+            note(
                 "Arraste a bolinha para mover. Toque nela para pausar/retomar, ligar ou " +
                     "desligar o arrasto, abrir o Painel de mira ou parar. Verde = rodando, " +
                     "amarela = pausado. Deixe-a longe do ponto de partida do dedo. Com o " +
@@ -330,12 +381,82 @@ class MainActivity : AppCompatActivity() {
             )
         )
 
-        // Iniciar / parar
-        btnStart = button("INICIAR") { onStartStop() }
-        btnStart.textSize = 18f
-        root.addView(btnStart)
+        page.addView(ScrollView(this).apply { addView(content) }, LinearLayout.LayoutParams(MATCH, 0, 1f))
+        page.addView(bottomBar())
+        return page
+    }
 
-        return ScrollView(this).apply { addView(root) }
+    private fun header(): View {
+        val row = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(16), dp(14), dp(16), dp(10))
+        }
+        row.addView(ImageView(this).apply {
+            setImageResource(R.drawable.ic_logo)
+            setPadding(dp(5), dp(5), dp(5), dp(5))
+            background = GradientDrawable(
+                GradientDrawable.Orientation.TL_BR,
+                intArrayOf(Color.parseColor("#4C35CC"), Color.parseColor("#271A6B"))
+            ).apply { cornerRadius = dpf(14f) }
+            layoutParams = LinearLayout.LayoutParams(dp(48), dp(48))
+        })
+        val titles = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            layoutParams = LinearLayout.LayoutParams(0, WRAP, 1f).apply { leftMargin = dp(12) }
+        }
+        titles.addView(TextView(this).apply {
+            text = "Vision Paint Macro"
+            textSize = 20f
+            setTextColor(themeColor(R.color.vp_text))
+            setTypeface(typeface, Typeface.BOLD)
+        })
+        titles.addView(TextView(this).apply {
+            text = "Reconhece imagens na tela, pinta e mira"
+            textSize = 13f
+            setTextColor(themeColor(R.color.vp_text_secondary))
+        })
+        row.addView(titles)
+        return row
+    }
+
+    private fun bottomBar(): View {
+        val wrap = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        wrap.addView(View(this).apply {
+            setBackgroundColor(themeColor(R.color.vp_stroke))
+            layoutParams = LinearLayout.LayoutParams(MATCH, dp(1))
+        })
+        val bar = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(16), dp(10), dp(16), dp(10))
+            setBackgroundColor(themeColor(R.color.vp_surface))
+        }
+        statusDot = View(this).apply {
+            layoutParams = LinearLayout.LayoutParams(dp(10), dp(10)).apply { rightMargin = dp(10) }
+        }
+        bar.addView(statusDot)
+        val texts = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            layoutParams = LinearLayout.LayoutParams(0, WRAP, 1f)
+        }
+        tvStatus = TextView(this).apply {
+            textSize = 15f
+            setTextColor(themeColor(R.color.vp_text))
+            setTypeface(typeface, Typeface.BOLD)
+        }
+        tvStatusSub = TextView(this).apply {
+            textSize = 12f
+            setTextColor(themeColor(R.color.vp_text_secondary))
+        }
+        texts.addView(tvStatus)
+        texts.addView(tvStatusSub)
+        bar.addView(texts)
+        btnStart = button("INICIAR", Kind.PRIMARY) { onStartStop() }
+        btnStart.minimumWidth = dp(120)
+        bar.addView(btnStart, LinearLayout.LayoutParams(WRAP, WRAP))
+        wrap.addView(bar)
+        return wrap
     }
 
     // ------------------------------------------------------------------ lista de imagens
@@ -343,6 +464,18 @@ class MainActivity : AppCompatActivity() {
     private fun rebuildRows() {
         rowsBox.removeAllViews()
         val list = TemplateStore.list()
+        if (list.isEmpty()) {
+            rowsBox.addView(TextView(this).apply {
+                text = "Nenhuma imagem ainda. Toque em \"Adicionar imagens\"."
+                textSize = 13f
+                gravity = Gravity.CENTER
+                setTextColor(themeColor(R.color.vp_text_secondary))
+                setPadding(dp(12), dp(18), dp(12), dp(18))
+                background = rounded(themeColor(R.color.vp_surface_variant), 14f)
+                layoutParams = LinearLayout.LayoutParams(MATCH, WRAP).apply { bottomMargin = dp(8) }
+            })
+            return
+        }
         list.forEachIndexed { i, t -> rowsBox.addView(templateRow(i, list.size, t)) }
     }
 
@@ -350,39 +483,44 @@ class MainActivity : AppCompatActivity() {
         val row = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            setPadding(0, dp(8), 0, dp(8))
+            setPadding(dp(10), dp(10), dp(10), dp(10))
+            background = rounded(themeColor(R.color.vp_surface_variant), 14f)
+            layoutParams = LinearLayout.LayoutParams(MATCH, WRAP).apply { bottomMargin = dp(8) }
         }
 
-        val img = ImageView(this).apply {
+        row.addView(ImageView(this).apply {
             layoutParams = LinearLayout.LayoutParams(dp(60), dp(60))
             scaleType = ImageView.ScaleType.CENTER_INSIDE
-            setBackgroundColor(Color.parseColor("#33888888"))
+            background = rounded(themeColor(R.color.vp_surface), 10f)
             setImageBitmap(TemplateStore.thumb(t.id))
-        }
-        row.addView(img)
+        })
 
         val mid = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+            layoutParams = LinearLayout.LayoutParams(0, WRAP, 1f)
             setPadding(dp(10), 0, dp(6), 0)
         }
         mid.addView(TextView(this).apply {
             text = "Imagem ${index + 1}"
+            textSize = 15f
+            setTextColor(themeColor(R.color.vp_text))
             setTypeface(typeface, Typeface.BOLD)
         })
 
         val colorRow = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            setPadding(0, dp(4), 0, dp(2))
+            setPadding(0, dp(6), 0, dp(2))
             setOnClickListener { showColorDialog(t) }
         }
         colorRow.addView(View(this).apply {
-            layoutParams = LinearLayout.LayoutParams(dp(40), dp(24))
-            setBackgroundColor(t.color ?: MacroSettings.color)
+            layoutParams = LinearLayout.LayoutParams(dp(36), dp(22))
+            background = rounded(t.color ?: MacroSettings.color, 6f, themeColor(R.color.vp_stroke))
         })
         colorRow.addView(TextView(this).apply {
             text = if (t.color == null) "  cor padrão (toque)" else "  cor própria (toque)"
+            textSize = 13f
+            setTextColor(themeColor(R.color.vp_text_secondary))
         })
         mid.addView(colorRow)
         mid.addView(switch("Arrastar até ela", t.drag) { TemplateStore.setDrag(t.id, it) })
@@ -414,15 +552,21 @@ class MainActivity : AppCompatActivity() {
             setPadding(dp(20), dp(12), dp(20), dp(4))
         }
         val preview = View(this).apply {
-            layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(36))
-            setBackgroundColor(start)
+            layoutParams = LinearLayout.LayoutParams(MATCH, dp(40))
+            background = rounded(start, 12f, themeColor(R.color.vp_stroke))
         }
         box.addView(preview)
         val names = arrayOf("Vermelho", "Verde", "Azul")
+        val tints = intArrayOf(
+            Color.parseColor("#E5484D"),
+            Color.parseColor("#30A46C"),
+            Color.parseColor("#3E63DD")
+        )
         for (i in 0..2) {
-            box.addView(slider(names[i], 0, 255, rgb[i], "") { v ->
+            box.addView(slider(names[i], 0, 255, rgb[i], "", tints[i]) { v ->
                 rgb[i] = v
-                preview.setBackgroundColor(Color.rgb(rgb[0], rgb[1], rgb[2]))
+                preview.background =
+                    rounded(Color.rgb(rgb[0], rgb[1], rgb[2]), 12f, themeColor(R.color.vp_stroke))
             })
         }
 
@@ -476,95 +620,267 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun refresh() {
-        tvTemplates.text = "Imagens de referência: ${TemplateStore.count()}"
+        val n = TemplateStore.count()
+        tvTemplates.text = if (n == 1) "1 imagem de referência" else "$n imagens de referência"
         rebuildRows()
-        tvOverlay.text = if (AndroidSettings.canDrawOverlays(this)) {
-            "✔ Sobreposição permitida"
-        } else {
-            "✘ Sobreposição não permitida"
-        }
-        tvAccess.text = if (MacroAccessibilityService.instance != null) {
-            "✔ Acessibilidade ativa"
-        } else {
-            "✘ Acessibilidade desativada (só é necessária para o arrasto)"
-        }
+        setChip(tvOverlay, AndroidSettings.canDrawOverlays(this), "Permitida", "Pendente")
+        setChip(tvAccess, MacroAccessibilityService.instance != null, "Ativa", "Desativada")
         // A bolinha também liga/desliga o arrasto: mantém a chave igual ao estado atual.
         swDrag.isChecked = MacroSettings.dragEnabled
         swAim.isChecked = MacroSettings.aimMode
         syncs.forEach { it() }
-        btnStart.text = if (CaptureService.running) "PARAR" else "INICIAR"
+
+        val running = CaptureService.running
+        btnStart.text = if (running) "PARAR" else "INICIAR"
+        styleButton(btnStart, if (running) Kind.STOP else Kind.PRIMARY)
+        tvStatus.text = if (running) "Rodando" else "Parado"
+        tvStatusSub.text = if (running) {
+            "Procurando as imagens na tela"
+        } else if (n == 0) {
+            "Adicione imagens para começar"
+        } else {
+            "Pronto para iniciar"
+        }
+        statusDot.background = oval(
+            themeColor(if (running) R.color.vp_success else R.color.vp_text_secondary)
+        )
     }
 
     // ------------------------------------------------------------------ helpers de UI
 
     private fun dp(v: Int): Int = (v * resources.displayMetrics.density).toInt()
 
+    private fun dpf(v: Float): Float = v * resources.displayMetrics.density
+
     private fun toast(msg: String) = Toast.makeText(this, msg, Toast.LENGTH_SHORT).show()
 
-    private fun heading(t: String, size: Float) = TextView(this).apply {
-        text = t
-        textSize = size
-        setPadding(0, dp(18), 0, dp(6))
-        setTypeface(typeface, Typeface.BOLD)
+    private fun themeColor(id: Int): Int = ContextCompat.getColor(this, id)
+
+    private fun lp(top: Int): LinearLayout.LayoutParams =
+        LinearLayout.LayoutParams(MATCH, WRAP).apply { topMargin = dp(top) }
+
+    private fun rounded(fill: Int, radiusDp: Float, stroke: Int? = null): GradientDrawable =
+        GradientDrawable().apply {
+            setColor(fill)
+            cornerRadius = dpf(radiusDp)
+            if (stroke != null) setStroke(dp(1), stroke)
+        }
+
+    private fun oval(fill: Int): GradientDrawable = GradientDrawable().apply {
+        shape = GradientDrawable.OVAL
+        setColor(fill)
     }
 
-    private fun text(t: String) = TextView(this).apply {
+    /** Cartão de seção: número, título e o conteúdo logo abaixo. */
+    private fun card(n: Int, title: String): LinearLayout {
+        val box = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(16), dp(14), dp(16), dp(14))
+            background = rounded(themeColor(R.color.vp_surface), 18f, themeColor(R.color.vp_stroke))
+            layoutParams = LinearLayout.LayoutParams(MATCH, WRAP).apply { bottomMargin = dp(12) }
+        }
+        val head = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(0, 0, 0, dp(6))
+        }
+        head.addView(TextView(this).apply {
+            text = n.toString()
+            textSize = 12f
+            gravity = Gravity.CENTER
+            setTextColor(themeColor(R.color.vp_on_accent))
+            setTypeface(typeface, Typeface.BOLD)
+            background = oval(themeColor(R.color.vp_accent))
+            layoutParams = LinearLayout.LayoutParams(dp(24), dp(24)).apply { rightMargin = dp(10) }
+        })
+        head.addView(TextView(this).apply {
+            text = title
+            textSize = 16f
+            setTextColor(themeColor(R.color.vp_text))
+            setTypeface(typeface, Typeface.BOLD)
+        })
+        box.addView(head)
+        return box
+    }
+
+    /** Texto de apoio (cinza, menor). */
+    private fun note(t: String) = TextView(this).apply {
         text = t
+        textSize = 13f
+        setTextColor(themeColor(R.color.vp_text_secondary))
+        setLineSpacing(0f, 1.1f)
         setPadding(0, dp(4), 0, dp(4))
     }
 
-    private fun button(label: String, onClick: () -> Unit) = Button(this).apply {
-        text = label
-        setOnClickListener { onClick() }
+    private fun chip(): TextView = TextView(this).apply {
+        textSize = 12f
+        setTypeface(typeface, Typeface.BOLD)
+        setPadding(dp(10), dp(4), dp(10), dp(4))
     }
 
-    private fun smallButton(label: String, enabled: Boolean, onClick: () -> Unit) =
+    private fun setChip(tv: TextView, ok: Boolean, okText: String, badText: String) {
+        val tint = themeColor(if (ok) R.color.vp_success else R.color.vp_warning)
+        tv.text = if (ok) "✔ $okText" else "✘ $badText"
+        tv.setTextColor(tint)
+        tv.background = rounded(ColorUtils.setAlphaComponent(tint, 0x26), 12f)
+    }
+
+    /** Linha de permissão: nome, estado (chip) e o botão que leva à configuração. */
+    private fun permRow(title: String, chip: TextView, action: String, onClick: () -> Unit): View {
+        val box = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(0, dp(6), 0, dp(6))
+        }
+        val top = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+        top.addView(TextView(this).apply {
+            text = title
+            textSize = 15f
+            setTextColor(themeColor(R.color.vp_text))
+            layoutParams = LinearLayout.LayoutParams(0, WRAP, 1f)
+        })
+        top.addView(chip)
+        box.addView(top)
+        box.addView(button(action, Kind.TONAL, onClick), lp(8))
+        return box
+    }
+
+    private fun styleButton(b: Button, kind: Kind) {
+        val accentText = themeColor(R.color.vp_accent_text)
+        val danger = themeColor(R.color.vp_danger_fill)
+        val white = themeColor(R.color.vp_on_accent)
+        val (fill, fg, ripple) = when (kind) {
+            Kind.PRIMARY -> Triple(themeColor(R.color.vp_accent), white, 0x33FFFFFF)
+            Kind.TONAL -> Triple(
+                themeColor(R.color.vp_surface_variant),
+                accentText,
+                ColorUtils.setAlphaComponent(accentText, 0x33)
+            )
+            Kind.DANGER -> Triple(
+                ColorUtils.setAlphaComponent(danger, 0x1F),
+                danger,
+                ColorUtils.setAlphaComponent(danger, 0x33)
+            )
+            Kind.STOP -> Triple(danger, white, 0x33FFFFFF)
+        }
+        b.setTextColor(fg)
+        b.background = RippleDrawable(
+            ColorStateList.valueOf(ripple),
+            rounded(fill, 12f),
+            rounded(Color.WHITE, 12f)
+        )
+    }
+
+    private fun button(label: String, kind: Kind, onClick: () -> Unit): Button =
         Button(this).apply {
             text = label
+            setAllCaps(false)
+            textSize = 15f
+            setTypeface(typeface, Typeface.BOLD)
+            minHeight = 0
+            minimumHeight = dp(48)
+            stateListAnimator = null
+            styleButton(this, kind)
+            setOnClickListener { onClick() }
+        }
+
+    private fun smallButton(label: String, enabled: Boolean, onClick: () -> Unit): Button =
+        Button(this).apply {
+            text = label
+            setAllCaps(false)
+            textSize = 14f
+            setTypeface(typeface, Typeface.BOLD)
             isEnabled = enabled
+            alpha = if (enabled) 1f else 0.35f
             minWidth = 0
             minimumWidth = 0
             minHeight = 0
             minimumHeight = 0
-            setPadding(dp(14), dp(6), dp(14), dp(6))
+            stateListAnimator = null
+            setPadding(0, 0, 0, 0)
+            layoutParams = LinearLayout.LayoutParams(dp(42), dp(36)).apply { bottomMargin = dp(4) }
+            styleButton(this, Kind.TONAL)
             setOnClickListener { onClick() }
         }
 
     private fun switch(label: String, start: Boolean, onChange: (Boolean) -> Unit): SwitchCompat =
         SwitchCompat(this).apply {
             text = label
+            textSize = 15f
+            setTextColor(themeColor(R.color.vp_text))
             isChecked = start
             setPadding(0, dp(8), 0, dp(8))
+            val on = themeColor(R.color.vp_accent)
+            val off = themeColor(R.color.vp_text_secondary)
+            val states = arrayOf(intArrayOf(android.R.attr.state_checked), intArrayOf())
+            thumbTintList = ColorStateList(states, intArrayOf(Color.WHITE, off))
+            trackTintList = ColorStateList(states, intArrayOf(on, ColorUtils.setAlphaComponent(off, 0x66)))
             setOnCheckedChangeListener { _, checked -> onChange(checked) }
         }
 
     /** Slider de posição na tela (0 a 100 %), que se atualiza ao voltar para o app. */
     private fun positionSlider(label: String, get: () -> Int, set: (Int) -> Unit): View {
-        val box = slider(label, 0, 100, get(), "%") { set(it) } as LinearLayout
-        syncs.add { (box.getChildAt(1) as SeekBar).progress = get().coerceIn(0, 100) }
+        val (box, bar) = sliderPair(label, 0, 100, get(), "%", null) { set(it) }
+        syncs.add { bar.progress = get().coerceIn(0, 100) }
         return box
     }
 
     private fun slider(
         label: String,
-        min: Int,
-        max: Int,
+        lo: Int,
+        hi: Int,
         start: Int,
         unit: String,
+        tint: Int? = null,
         onChange: (Int) -> Unit
-    ): View {
+    ): View = sliderPair(label, lo, hi, start, unit, tint, onChange).first
+
+    /** Nome à esquerda, valor à direita e a barra embaixo; devolve também a barra. */
+    private fun sliderPair(
+        label: String,
+        lo: Int,
+        hi: Int,
+        start: Int,
+        unit: String,
+        tint: Int?,
+        onChange: (Int) -> Unit
+    ): Pair<View, SeekBar> {
         val box = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(0, dp(6), 0, dp(6))
+            setPadding(0, dp(8), 0, dp(2))
         }
-        val tv = TextView(this).apply { text = "$label: $start$unit" }
+        val head = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+        val valueTv = TextView(this).apply {
+            text = "$start$unit"
+            textSize = 13f
+            setTextColor(themeColor(R.color.vp_accent_text))
+            setTypeface(typeface, Typeface.BOLD)
+        }
+        head.addView(TextView(this).apply {
+            text = label
+            textSize = 14f
+            setTextColor(themeColor(R.color.vp_text))
+            layoutParams = LinearLayout.LayoutParams(0, WRAP, 1f)
+        })
+        head.addView(valueTv)
+
+        val barColor = tint ?: themeColor(R.color.vp_accent)
         val sb = SeekBar(this).apply {
-            this.max = max - min
-            progress = (start - min).coerceIn(0, max - min)
+            max = hi - lo
+            progress = (start - lo).coerceIn(0, hi - lo)
+            progressTintList = ColorStateList.valueOf(barColor)
+            thumbTintList = ColorStateList.valueOf(barColor)
+            progressBackgroundTintList =
+                ColorStateList.valueOf(ColorUtils.setAlphaComponent(barColor, 0x44))
             setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
                 override fun onProgressChanged(s: SeekBar?, p: Int, fromUser: Boolean) {
-                    val v = p + min
-                    tv.text = "$label: $v$unit"
+                    val v = p + lo
+                    valueTv.text = "$v$unit"
                     if (fromUser) onChange(v)
                 }
 
@@ -572,8 +888,8 @@ class MainActivity : AppCompatActivity() {
                 override fun onStopTrackingTouch(s: SeekBar?) {}
             })
         }
-        box.addView(tv)
+        box.addView(head)
         box.addView(sb)
-        return box
+        return Pair(box, sb)
     }
 }

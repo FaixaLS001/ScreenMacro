@@ -1,10 +1,12 @@
 package com.macro.visionpaint
 
 import android.content.Context
+import android.content.res.ColorStateList
 import android.graphics.Color
 import android.graphics.PixelFormat
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
+import android.graphics.drawable.RippleDrawable
 import android.os.Build
 import android.view.Gravity
 import android.view.MotionEvent
@@ -39,22 +41,22 @@ class FloatingControls(
     private val wm = ctx.getSystemService(Context.WINDOW_SERVICE) as WindowManager
     private val d = ctx.resources.displayMetrics.density
 
-    private val green = Color.parseColor("#2E7D32")
-    private val amber = Color.parseColor("#F9A825")
+    private val green = Color.parseColor("#1F9D63")
+    private val amber = Color.parseColor("#E8890C")
 
     private val bubbleBg = GradientDrawable().apply {
         shape = GradientDrawable.OVAL
         setColor(green)
+        setStroke(dp(2), Color.parseColor("#80FFFFFF"))
     }
 
-    private val bubble = TextView(ctx).apply {
-        text = "VP"
-        setTextColor(Color.WHITE)
-        textSize = 14f
-        gravity = Gravity.CENTER
-        setTypeface(typeface, Typeface.BOLD)
+    /** A bolinha mostra a mira quando está rodando e o símbolo de pausa quando está pausada. */
+    private val bubble = ImageView(ctx).apply {
+        setImageResource(R.drawable.ic_bubble_running)
+        scaleType = ImageView.ScaleType.FIT_CENTER
+        setPadding(dp(11), dp(11), dp(11), dp(11))
         background = bubbleBg
-        alpha = 0.9f
+        alpha = 0.92f
         layoutParams = LinearLayout.LayoutParams(dp(46), dp(46))
     }
 
@@ -63,11 +65,15 @@ class FloatingControls(
     private val btnPause: TextView = menuItem()
     private val btnDrag: TextView = menuItem()
     private val btnPanel: TextView = menuItem().apply { text = "Painel de mira" }
-    private val btnStop: TextView = menuItem().apply { text = "Parar" }
+    private val btnStop: TextView = menuItem().apply {
+        text = "Parar"
+        setTextColor(Color.parseColor("#FF8FA3"))
+    }
 
     private val menu = LinearLayout(ctx).apply {
         orientation = LinearLayout.VERTICAL
         visibility = View.GONE
+        setPadding(dp(4), dp(6), dp(4), dp(6))
         background = panelBg()
         addView(btnPause)
         addView(btnDrag)
@@ -230,14 +236,26 @@ class FloatingControls(
     private fun dp(v: Int): Int = (v * d).toInt()
 
     private fun panelBg(): GradientDrawable = GradientDrawable().apply {
-        setCornerRadius(12f * d)
-        setColor(Color.parseColor("#EE212121"))
+        setCornerRadius(16f * d)
+        setColor(Color.parseColor("#F2171433"))
+        setStroke(dp(1), Color.parseColor("#4D6C5CFF"))
     }
+
+    /** Fundo transparente com efeito de toque (ondulação) de cantos arredondados. */
+    private fun rippleBg(): RippleDrawable = RippleDrawable(
+        ColorStateList.valueOf(Color.parseColor("#33FFFFFF")),
+        null,
+        GradientDrawable().apply {
+            setCornerRadius(10f * d)
+            setColor(Color.WHITE)
+        }
+    )
 
     private fun menuItem(): TextView = TextView(ctx).apply {
         setTextColor(Color.WHITE)
         textSize = 14f
         setPadding(dp(16), dp(11), dp(16), dp(11))
+        background = rippleBg()
     }
 
     private fun trayButton(): TextView = TextView(ctx).apply {
@@ -253,8 +271,8 @@ class FloatingControls(
 
     private fun style(btn: TextView, active: Boolean, activeColor: Int = green) {
         btn.background = GradientDrawable().apply {
-            setCornerRadius(8f * d)
-            setColor(if (active) activeColor else Color.parseColor("#33FFFFFF"))
+            setCornerRadius(10f * d)
+            setColor(if (active) activeColor else Color.parseColor("#2EFFFFFF"))
         }
     }
 
@@ -309,6 +327,7 @@ class FloatingControls(
     fun refresh() {
         val paused = isPaused()
         bubbleBg.setColor(if (paused) amber else green)
+        bubble.setImageResource(if (paused) R.drawable.ic_bubble_paused else R.drawable.ic_bubble_running)
         btnPause.text = if (paused) "Retomar" else "Pausar"
         btnDrag.text = if (MacroSettings.dragEnabled) "Arrasto: ligado" else "Arrasto: desligado"
 
@@ -436,7 +455,7 @@ class FloatingControls(
                     setCornerRadius(6f * d)
                     setColor(Color.parseColor(if (selected) "#44FFFFFF" else "#22000000"))
                     if (selected) {
-                        setStroke(dp(3), Color.parseColor("#43A047"))
+                        setStroke(dp(3), green)
                     } else {
                         setStroke(dp(1), Color.parseColor("#55FFFFFF"))
                     }

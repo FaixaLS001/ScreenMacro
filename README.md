@@ -28,6 +28,19 @@ Alternativa: abrir esta pasta no Android Studio e usar Build > Build APK.
 5. **INICIAR**, autorize o compartilhamento de tela e abra o app/jogo.
    Para parar, use o botão **Parar** da notificação ou o botão PARAR do app.
 
+## Novidades da versão 1.3: visual novo
+
+- **Tema claro e escuro** automático, seguindo o do celular (cores em `res/values` e `res/values-night`).
+- **Tela principal redesenhada**: cabeçalho com o logo, seções em cartões numerados, sliders
+  coloridos (vermelho, verde e azul na escolha de cor), chaves e botões no mesmo estilo, e uma
+  **barra fixa embaixo** com o estado (Rodando/Parado) e o botão INICIAR/PARAR sempre à mão.
+- **Novo ícone do app**: moldura de captura com uma mira no centro. É um ícone adaptativo
+  (com versão monocromática para o Android 13+) e traz PNGs para o Android 7.
+- **Bolinha flutuante** com a mira desenhada (e o símbolo de pausa quando pausada), painéis com
+  bordas arredondadas e efeito de toque nos botões.
+- **Notificação** com ícone próprio e cor do app.
+- Nada mudou no funcionamento: mesmas permissões, ajustes e modo mira da versão 1.2.
+
 ## Novidades da versão 1.2: modo mira
 
 Pensado para jogos de tiro em que o dedo arrasta numa área da tela para mover a mira

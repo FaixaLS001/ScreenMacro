@@ -138,7 +138,8 @@ class CaptureService : Service() {
             this, 1, Intent(this, MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE
         )
         val notification: Notification = NotificationCompat.Builder(this, CHANNEL)
-            .setSmallIcon(android.R.drawable.ic_menu_view)
+            .setSmallIcon(R.drawable.ic_stat_macro)
+            .setColor(0xFF7C5CFF.toInt())
             .setContentTitle("Vision Paint Macro")
             .setContentText("Analisando a tela...")
             .setContentIntent(openPi)

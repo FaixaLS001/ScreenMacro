@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="vp_bg">#0E0F1C</color>
+    <color name="vp_surface">#181A2E</color>
+    <color name="vp_surface_variant">#22254A</color>
+    <color name="vp_stroke">#2E3158</color>
+    <color name="vp_text">#ECEDFF</color>
+    <color name="vp_text_secondary">#A3A6C8</color>
+    <color name="vp_accent">#7C5CFF</color>
+    <color name="vp_accent_text">#A996FF</color>
+    <color name="vp_on_accent">#FFFFFF</color>
+    <color name="vp_danger_fill">#E5365F</color>
+    <color name="vp_warning">#F2A33A</color>
+    <color name="vp_success">#3DCB8B</color>
+</resources>
