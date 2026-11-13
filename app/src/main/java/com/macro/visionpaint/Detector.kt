@@ -12,7 +12,7 @@ import org.opencv.imgproc.Imgproc
 import java.io.File
 
 /** Um alvo encontrado. [rect] já está em pixels reais da tela. */
-data class Target(val rect: Rect, val score: Float) {
+data class Target(val rect: Rect, val score: Float, val tplId: String) {
     val cx: Float get() = rect.exactCenterX()
     val cy: Float get() = rect.exactCenterY()
 }
@@ -24,12 +24,14 @@ data class Target(val rect: Rect, val score: Float) {
 class Detector(private val scale: Float) {
 
     private val templates = ArrayList<Mat>()
+    private val ids = ArrayList<String>()
 
     fun templateCount(): Int = templates.size
 
-    fun loadTemplates(files: List<File>) {
+    /** [items]: pares (id da imagem, arquivo). O id volta em cada [Target] encontrado. */
+    fun loadTemplates(items: List<Pair<String, File>>) {
         release()
-        for (f in files) {
+        for ((id, f) in items) {
             val bmp = BitmapFactory.decodeFile(f.absolutePath) ?: continue
             val rgba = Mat()
             Utils.bitmapToMat(bmp, rgba)
@@ -49,6 +51,7 @@ class Detector(private val scale: Float) {
             Imgproc.resize(rgb, small, Size(w.toDouble(), h.toDouble()), 0.0, 0.0, Imgproc.INTER_AREA)
             rgb.release()
             templates.add(small)
+            ids.add(id)
         }
     }
 
@@ -62,7 +65,7 @@ class Detector(private val scale: Float) {
         val res = Mat()
         val inv = 1f / scale
 
-        for (tpl in templates) {
+        for ((k, tpl) in templates.withIndex()) {
             if (tpl.cols() > frame.cols() || tpl.rows() > frame.rows()) continue
             Imgproc.matchTemplate(frame, tpl, res, Imgproc.TM_CCOEFF_NORMED)
 
@@ -81,7 +84,8 @@ class Detector(private val scale: Float) {
                             ((x + tpl.cols()) * inv).toInt(),
                             ((y + tpl.rows()) * inv).toInt()
                         ),
-                        mm.maxVal.toFloat()
+                        mm.maxVal.toFloat(),
+                        ids[k]
                     )
                 )
 
@@ -107,5 +111,6 @@ class Detector(private val scale: Float) {
     fun release() {
         templates.forEach { it.release() }
         templates.clear()
+        ids.clear()
     }
 }

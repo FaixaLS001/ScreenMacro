@@ -33,10 +33,13 @@ import org.opencv.core.Mat
 import org.opencv.imgproc.Imgproc
 import kotlin.math.hypot
 import kotlin.math.max
+import kotlin.math.min
 
 /**
  * Serviço principal: captura a tela (compartilhamento de tela), procura as imagens,
  * pinta os alvos no overlay e, se ligado, manda o arrasto para o serviço de acessibilidade.
+ * No modo mira, em vez de arrastar até o alvo, leva a mira do jogo até o centro da imagem
+ * e a mantém fixa ali.
  */
 class CaptureService : Service() {
 
@@ -50,6 +53,10 @@ class CaptureService : Service() {
 
         @Volatile
         var running = false
+
+        /** true enquanto o macro está pausado pela bolinha flutuante. */
+        @Volatile
+        var paused = false
     }
 
     private val main = Handler(Looper.getMainLooper())
@@ -64,7 +71,22 @@ class CaptureService : Service() {
 
     private var wm: WindowManager? = null
     private var overlay: OverlayView? = null
+
+    // Lidos também pela thread da análise.
+    @Volatile
+    private var controls: FloatingControls? = null
+
+    @Volatile
+    private var markers: AimMarkers? = null
     private var displayListener: DisplayManager.DisplayListener? = null
+
+    // Modo mira (só a thread da análise mexe nestes).
+    private val aim = AimController()
+    private var stickyTpl: String? = null
+    private var stickyX = 0f
+    private var stickyY = 0f
+    private var aimLastSeen = 0L
+    private var lastHintToast = 0L
 
     private var screenW = 0
     private var screenH = 0
@@ -76,6 +98,7 @@ class CaptureService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         MacroSettings.init(this)
+        TemplateStore.init(this)
         when (intent?.action) {
             ACTION_STOP -> {
                 stopAll()
@@ -137,10 +160,10 @@ class CaptureService : Service() {
             return false
         }
 
-        val files = TemplateStore.list(this)
+        val items = TemplateStore.list().map { it.id to TemplateStore.file(it.id) }
         scale = MacroSettings.scalePct / 100f
         val det = Detector(scale)
-        det.loadTemplates(files)
+        det.loadTemplates(items)
         if (det.templateCount() == 0) {
             toast("Adicione ao menos uma imagem válida primeiro.")
             det.release()
@@ -183,7 +206,10 @@ class CaptureService : Service() {
             DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR, r.surface, null, handler
         )
 
+        paused = false
         addOverlay()
+        addMarkers()
+        addControls()
         watchRotation()
         running = true
         return true
@@ -218,6 +244,41 @@ class CaptureService : Service() {
         val v = OverlayView(this)
         manager.addView(v, lp)
         overlay = v
+    }
+
+    // ---------------------------------------------------------------- marcadores da mira
+
+    /** Camada com os marcadores "onde o dedo pressiona" e "onde fica a mira" (quase invisíveis). */
+    private fun addMarkers() {
+        val m = AimMarkers(this)
+        m.show()
+        markers = m
+    }
+
+    // ---------------------------------------------------------------- botão flutuante
+
+    private fun addControls() {
+        if (!MacroSettings.showBubble) return
+        val m = markers ?: return
+        val c = FloatingControls(
+            this,
+            markers = m,
+            isPaused = { paused },
+            onTogglePause = { togglePause() },
+            onToggleDrag = { MacroSettings.dragEnabled = !MacroSettings.dragEnabled },
+            onStop = { main.post { stopAll() } }
+        )
+        c.show()
+        controls = c
+    }
+
+    private fun togglePause() {
+        paused = !paused
+        if (paused) {
+            // Some com a pintura e a rota na hora.
+            overlay?.update(emptyList(), null, 0f, 0f, false, MacroSettings.paintAlphaPct)
+            markers?.setLocked(false)
+        }
     }
 
     // ---------------------------------------------------------------- rotação
@@ -272,6 +333,7 @@ class CaptureService : Service() {
             val now = SystemClock.uptimeMillis()
             if (now - lastProcess < 60) return
             lastProcess = now
+            if (paused) return
 
             val det = detector ?: return
             val plane = image.planes[0]
@@ -304,19 +366,159 @@ class CaptureService : Service() {
     }
 
     private fun publish(targets: List<Target>) {
-        val ox = screenW * MacroSettings.originXPct / 100f
-        val oy = screenH * MacroSettings.originYPct / 100f
-        val nearest = targets.minByOrNull { hypot(it.cx - ox, it.cy - oy) }
+        val aimMode = MacroSettings.aimMode
 
-        val color = MacroSettings.color
-        val alpha = MacroSettings.paintAlphaPct
-        val showRoute = MacroSettings.showRoute
-        main.post {
-            overlay?.update(targets, nearest, ox, oy, showRoute, color, alpha)
+        // Ponto onde o dedo pressiona (partida do arrasto) e posição da mira do jogo.
+        val ox = screenW * MacroSettings.originXPm / 1000f
+        val oy = screenH * MacroSettings.originYPm / 1000f
+        val mx = screenW * MacroSettings.aimXPm / 1000f
+        val my = screenH * MacroSettings.aimYPm / 1000f
+
+        // Cada alvo é pintado na cor da sua imagem (ou na cor padrão, se não tiver uma).
+        val defaultColor = MacroSettings.color
+        val painted = targets.map { t ->
+            Painted(t, TemplateStore.info(t.tplId)?.color ?: defaultColor)
         }
 
-        if (MacroSettings.dragEnabled && nearest != null) {
-            maybeDrag(ox, oy, nearest)
+        // Só as imagens marcadas com "Arrastar até ela" (ou escolhidas em "3 Imagem" no painel
+        // de mira) entram na escolha do alvo.
+        val candidates = painted.filter { TemplateStore.info(it.target.tplId)?.drag == true }
+        val chosen = if (aimMode) chooseAim(candidates, mx, my) else choose(candidates, ox, oy)
+
+        val alpha = MacroSettings.paintAlphaPct
+        val showRoute = MacroSettings.showRoute
+
+        var locked = false
+        if (aimMode) {
+            locked = handleAim(chosen?.target, ox, oy, mx, my)
+        } else if (MacroSettings.dragEnabled && chosen != null) {
+            maybeDrag(ox, oy, chosen.target)
+        }
+
+        // No modo mira a rota sai da mira (e não do ponto de pressão) até o centro da imagem.
+        val rx = if (aimMode) mx else ox
+        val ry = if (aimMode) my else oy
+        main.post {
+            if (!paused) {
+                overlay?.update(painted, chosen, rx, ry, showRoute, alpha)
+                markers?.setLocked(aimMode && locked)
+            }
+        }
+    }
+
+    // ---------------------------------------------------------------- modo mira
+
+    /**
+     * Escolhe a imagem em que a mira vai se fixar. Enquanto a imagem que já vinha sendo seguida
+     * continua visível (por perto de onde estava), segue ela e não troca por outra.
+     * Se não, vale a regra da tela principal, medida a partir da mira.
+     */
+    private fun chooseAim(c: List<Painted>, mx: Float, my: Float): Painted? {
+        if (c.isEmpty()) return null
+
+        val st = stickyTpl
+        if (st != null) {
+            val radius = 0.3f * min(screenW, screenH)
+            val same = c
+                .filter {
+                    it.target.tplId == st &&
+                        hypot(it.target.cx - stickyX, it.target.cy - stickyY) <= radius
+                }
+                .minByOrNull { hypot(it.target.cx - stickyX, it.target.cy - stickyY) }
+            if (same != null) {
+                stickyX = same.target.cx
+                stickyY = same.target.cy
+                return same
+            }
+        }
+
+        val pick = choose(c, mx, my)
+        if (pick != null) {
+            stickyTpl = pick.target.tplId
+            stickyX = pick.target.cx
+            stickyY = pick.target.cy
+        }
+        return pick
+    }
+
+    /**
+     * Um passo do modo mira: mede o erro entre a mira e o centro da imagem e, se estiver fora da
+     * zona de travamento, manda um arrasto de dedo a partir do ponto de pressão para corrigir.
+     * Devolve true quando a mira está fixa no centro.
+     */
+    private fun handleAim(t: Target?, ox: Float, oy: Float, mx: Float, my: Float): Boolean {
+        val now = SystemClock.uptimeMillis()
+        if (t == null) {
+            // A detecção pode falhar em um quadro: só solta a mira se a imagem sumir de vez.
+            if (now - aimLastSeen > 300L) {
+                aim.lost()
+                stickyTpl = null
+            }
+            return aim.locked
+        }
+        aimLastSeen = now
+
+        aim.tolerance = MacroSettings.aimTolPx.toFloat()
+        aim.setGain(MacroSettings.aimGainPct / 100f)
+        aim.learn = MacroSettings.aimLearn
+        aim.invertX = MacroSettings.aimInvertX
+        aim.invertY = MacroSettings.aimInvertY
+
+        // Não arrasta se: arrasto desligado, serviço de acessibilidade fora do ar, outro arrasto
+        // em andamento, pausa entre correções, ou painel/posicionamento abertos (o dedo
+        // automático poderia tocar no painel).
+        val svc = MacroAccessibilityService.instance
+        val canAct = MacroSettings.dragEnabled &&
+            svc != null && !svc.busy &&
+            now - svc.lastEnd >= MacroSettings.aimCooldownMs &&
+            controls?.isOpen != true &&
+            (markers?.placing ?: AimMarkers.NONE) == AimMarkers.NONE
+
+        val w = screenW.toFloat()
+        val h = screenH.toFloat()
+        val maxStep = 0.5f * min(w, h)
+
+        val step = aim.update(t.cx - mx, t.cy - my, t.tplId, now, canAct, maxStep)
+
+        if (aim.takeHint() && now - lastHintToast > 15000L) {
+            lastHintToast = now
+            toast("A mira parece se afastar da imagem. Tente \"Inverter horizontal/vertical\" nos ajustes da mira.")
+        }
+
+        if (step.swipe && svc != null) {
+            val margin = 8f
+            val fitted = AimMath.fit(ox, oy, step.dx, step.dy, w, h, margin)
+            val planned = hypot(step.dx, step.dy)
+            val sent = hypot(fitted[0], fitted[1])
+            // Se o arrasto foi encurtado para caber na tela, o controle precisa saber.
+            if (planned > 0f && sent < planned) aim.shrinkPending(sent / planned)
+            // Ponto de pressão colado na borda e arrasto apontando para fora: não há para onde
+            // ir. Não manda um toque parado (que se repetiria a cada pausa).
+            if (sent < 0.5f) return aim.locked
+
+            val pts = AimMath.path(
+                ox, oy, fitted[0], fitted[1],
+                MacroSettings.aimMinTravelPx.toFloat(), w, h, margin
+            )
+            val durationMs = (AimMath.length(pts) / MacroSettings.dragSpeed * 1000f)
+                .toLong().coerceIn(40L, 2000L)
+            svc.swipe(pts, durationMs)
+        }
+        return aim.locked
+    }
+
+    /** Escolhe qual alvo o dedo vai seguir, conforme o modo escolhido na tela principal. */
+    private fun choose(c: List<Painted>, ox: Float, oy: Float): Painted? {
+        if (c.isEmpty()) return null
+        return when (MacroSettings.targetMode) {
+            1 -> c.maxByOrNull { it.target.score }
+            2 -> c.minWithOrNull(
+                compareBy<Painted>(
+                    { TemplateStore.orderOf(it.target.tplId) },
+                    { hypot(it.target.cx - ox, it.target.cy - oy) }
+                )
+            )
+            else -> c.minByOrNull { hypot(it.target.cx - ox, it.target.cy - oy) }
         }
     }
 
@@ -339,6 +541,7 @@ class CaptureService : Service() {
         if (stopping) return
         stopping = true
         running = false
+        paused = false
 
         try {
             val dm = getSystemService(Context.DISPLAY_SERVICE) as DisplayManager
@@ -374,6 +577,12 @@ class CaptureService : Service() {
         } catch (e: Exception) {
         }
         projection = null
+
+        controls?.hide()
+        controls = null
+
+        markers?.hide()
+        markers = null
 
         overlay?.let {
             try {

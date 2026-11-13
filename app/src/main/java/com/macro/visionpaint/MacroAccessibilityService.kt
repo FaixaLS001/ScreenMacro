@@ -50,7 +50,15 @@ class MacroAccessibilityService : AccessibilityService() {
 
     /** Arrasta o dedo em linha reta de (fromX, fromY) até (toX, toY) em [durationMs]. */
     fun drag(fromX: Float, fromY: Float, toX: Float, toY: Float, durationMs: Long) {
-        if (busy) return
+        swipe(floatArrayOf(fromX, fromY, toX, toY), durationMs)
+    }
+
+    /**
+     * Arrasta o dedo por uma linha quebrada, em [durationMs] no total.
+     * [points]: x0, y0, x1, y1, ... (pelo menos dois pontos).
+     */
+    fun swipe(points: FloatArray, durationMs: Long) {
+        if (busy || points.size < 4) return
         busy = true
 
         main.post {
@@ -60,8 +68,12 @@ class MacroAccessibilityService : AccessibilityService() {
                 val maxY = (size.second - 1).toFloat()
 
                 val path = Path().apply {
-                    moveTo(fromX.coerceIn(0f, maxX), fromY.coerceIn(0f, maxY))
-                    lineTo(toX.coerceIn(0f, maxX), toY.coerceIn(0f, maxY))
+                    moveTo(points[0].coerceIn(0f, maxX), points[1].coerceIn(0f, maxY))
+                    var i = 2
+                    while (i + 1 < points.size) {
+                        lineTo(points[i].coerceIn(0f, maxX), points[i + 1].coerceIn(0f, maxY))
+                        i += 2
+                    }
                 }
                 val stroke = GestureDescription.StrokeDescription(path, 0L, durationMs.coerceAtLeast(1L))
                 val gesture = GestureDescription.Builder().addStroke(stroke).build()

@@ -10,18 +10,20 @@ import android.util.DisplayMetrics
 import android.view.Display
 import android.view.View
 
+/** Um alvo encontrado, já com a cor em que deve ser pintado. */
+data class Painted(val target: Target, val color: Int)
+
 /**
  * Camada transparente sobre a tela: pinta os alvos reconhecidos e desenha a rota do dedo.
  * Não recebe toques (os toques passam direto para o app que está por baixo).
  */
 class OverlayView(context: Context) : View(context) {
 
-    private var targets: List<Target> = emptyList()
-    private var routeTarget: Target? = null
+    private var items: List<Painted> = emptyList()
+    private var route: Painted? = null
     private var originX = 0f
     private var originY = 0f
     private var showRoute = true
-    private var paintColor = Color.RED
     private var alphaPct = 45
 
     private val d = resources.displayMetrics.density
@@ -45,49 +47,47 @@ class OverlayView(context: Context) : View(context) {
     }
 
     fun update(
-        targets: List<Target>,
-        route: Target?,
+        items: List<Painted>,
+        route: Painted?,
         originX: Float,
         originY: Float,
         showRoute: Boolean,
-        color: Int,
         alphaPct: Int
     ) {
-        this.targets = targets
-        this.routeTarget = route
+        this.items = items
+        this.route = route
         this.originX = originX
         this.originY = originY
         this.showRoute = showRoute
-        this.paintColor = color
         this.alphaPct = alphaPct
         invalidate()
     }
 
     override fun onDraw(canvas: Canvas) {
-        // Pintura translúcida por cima do alvo + contorno sólido por fora dele.
-        fill.color = paintColor
-        fill.alpha = alphaPct * 255 / 100
-        stroke.color = paintColor
         val half = stroke.strokeWidth / 2f
 
-        for (t in targets) {
-            val r = t.rect
+        // Pintura translúcida por cima de cada alvo + contorno sólido, cada um na sua cor.
+        for (p in items) {
+            val r = p.target.rect
+            fill.color = p.color
+            fill.alpha = alphaPct * 255 / 100
+            stroke.color = p.color
             canvas.drawRect(
                 r.left.toFloat(), r.top.toFloat(), r.right.toFloat(), r.bottom.toFloat(), fill
             )
             canvas.drawRect(r.left - half, r.top - half, r.right + half, r.bottom + half, stroke)
         }
 
-        val rt = routeTarget
+        val rt = route
         if (showRoute && rt != null) {
-            line.color = paintColor
-            canvas.drawLine(originX, originY, rt.cx, rt.cy, line)
+            line.color = rt.color
+            canvas.drawLine(originX, originY, rt.target.cx, rt.target.cy, line)
 
-            dot.color = paintColor
+            dot.color = rt.color
             canvas.drawCircle(originX, originY, 9f * d, dot)
             canvas.drawCircle(originX, originY, 9f * d, ring)
-            canvas.drawCircle(rt.cx, rt.cy, 5f * d, dot)
-            canvas.drawCircle(rt.cx, rt.cy, 5f * d, ring)
+            canvas.drawCircle(rt.target.cx, rt.target.cy, 5f * d, dot)
+            canvas.drawCircle(rt.target.cx, rt.target.cy, 5f * d, ring)
         }
     }
 }
