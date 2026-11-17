@@ -25,6 +25,15 @@ object MacroSettings {
         get() = sp.getFloat("threshold", 0.80f)
         set(v) = sp.edit().putFloat("threshold", v).apply()
 
+    /**
+     * Nota mínima para CONTINUAR seguindo um alvo já achado (0.30 a 0.95). Achar um alvo novo
+     * exige [threshold] (alta); seguir um que já se conhece aceita menos, porque já se sabe
+     * onde ele estava. É sempre limitada por [threshold].
+     */
+    var followThreshold: Float
+        get() = sp.getFloat("followThreshold", 0.55f)
+        set(v) = sp.edit().putFloat("followThreshold", v.coerceIn(0.30f, 0.95f)).apply()
+
     /** Opacidade da pintura em % (15 a 75). */
     var paintAlphaPct: Int
         get() = sp.getInt("paintAlpha", 45)
@@ -127,6 +136,43 @@ object MacroSettings {
     var aimLearn: Boolean
         get() = sp.getBoolean("aimLearn", true)
         set(v) = sp.edit().putBoolean("aimLearn", v).apply()
+
+    // ------------------------------------------------------------------ rastreio e desfoque
+
+    /** Por quanto tempo (ms) o app segue a última posição de um alvo perdido, antes de desistir. */
+    var holdMs: Int
+        get() = sp.getInt("holdMs", 400)
+        set(v) = sp.edit().putInt("holdMs", v.coerceIn(0, 1500)).apply()
+
+    /** Suaviza a posição do alvo e prevê pela velocidade (filtro de Kalman). */
+    var kalmanOn: Boolean
+        get() = sp.getBoolean("kalmanOn", true)
+        set(v) = sp.edit().putBoolean("kalmanOn", v).apply()
+
+    /** Quanto o filtro suaviza (0 a 100). Maior = mais liso e um pouco mais atrasado. */
+    var kalmanSmooth: Int
+        get() = sp.getInt("kalmanSmooth", 50)
+        set(v) = sp.edit().putInt("kalmanSmooth", v.coerceIn(0, 100)).apply()
+
+    /** Mede o deslocamento da tela inteira entre quadros (tremor/giro) e corrige a posição dos alvos. */
+    var shakeComp: Boolean
+        get() = sp.getBoolean("shakeComp", true)
+        set(v) = sp.edit().putBoolean("shakeComp", v).apply()
+
+    /** Desfoque leve aplicado ao quadro e às imagens antes de comparar, em décimos de pixel (0 = desligado). */
+    var blurTenths: Int
+        get() = sp.getInt("blurTenths", 0)
+        set(v) = sp.edit().putInt("blurTenths", v.coerceIn(0, 40)).apply()
+
+    /** Guarda versões borradas e um pouco maiores/menores de cada imagem para o rastreio. */
+    var blurVariants: Boolean
+        get() = sp.getBoolean("blurVariants", true)
+        set(v) = sp.edit().putBoolean("blurVariants", v).apply()
+
+    /** Tolerância da cor (matiz, 6 a 30) das imagens marcadas com "Achar por cor". */
+    var colorTol: Int
+        get() = sp.getInt("colorTol", 14)
+        set(v) = sp.edit().putInt("colorTol", v.coerceIn(6, 30)).apply()
 
     /** Desenha a linha da rota do dedo até o alvo. */
     var showRoute: Boolean

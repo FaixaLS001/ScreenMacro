@@ -28,6 +28,42 @@ Alternativa: abrir esta pasta no Android Studio e usar Build > Build APK.
 5. **INICIAR**, autorize o compartilhamento de tela e abra o app/jogo.
    Para parar, use o botão **Parar** da notificação ou o botão PARAR do app.
 
+## Versão 1.4.0: rastreio que aguenta borrão e tremor
+
+Tudo novo fica no cartão **7. Rastreio e desfoque** (e na **Nota para seguir**, no cartão 3).
+
+- **Histerese e inércia.** Achar um alvo exige a **Sensibilidade** (alta, ex.: 80%). Para continuar
+  seguindo, basta a **Nota para seguir** (ex.: 55%), porque já se sabe onde ele estava; perto de
+  onde ele deveria estar vale a nota baixa, e quanto mais longe, mais perto da nota alta (assim
+  um ruído parecido com o alvo não vira um "alvo fantasma"). Se o alvo some, o app segue a última
+  posição por **Segurar o alvo perdido** (padrão 400 ms) antes de desistir. A pintura fica mais
+  fraca enquanto a posição é só uma previsão.
+- **Filtro de Kalman.** Suaviza o tremor da posição e prevê pela velocidade (`Kalman.kt`,
+  `TargetTracker.kt`). Em simulação reduz o tremor em 10% a 30%; o ganho maior é a previsão
+  durante a inércia. **Quanto suavizar** troca tremor por atraso.
+- **Compensar o tremor da tela inteira** (`ShakeEstimator.kt`). Mede, com `phaseCorrelate`, quanto
+  a tela toda andou entre dois quadros e corrige a previsão dos alvos mesmo quando a detecção
+  falha. Ignora o miolo da mira (a mira fixa do jogo estragaria a medida) e os próprios alvos, e
+  devolve "não sei" quando a confiança é baixa. No modo mira, a zona de travamento alarga
+  enquanto a tela treme, para a mira não "caçar" um alvo que só tremeu.
+- **Desfoque.** *Versões borradas e de outro tamanho* guardam, para cada imagem, variantes que o
+  rastreio testa (só na região pequena, então custa pouco). *Desfoque leve antes de comparar*
+  borra o quadro e as imagens. Os dois valem ao iniciar. Dica sem código: adicione 2 ou 3 prints
+  do mesmo alvo desfocado ou tremendo.
+- **Achar por cor** (por imagem, cartão 2). Usa a cor marcante da imagem para achar candidatos e a
+  imagem só confirma (nota entre a de achar e a de seguir): a varredura completa fica bem mais
+  rápida. No rastreio, a cor segura o alvo quando a imagem não combina por causa do borrão, mas
+  só por até 1,5 s. Imagens cinzas, sem cor marcante, ignoram a opção (o app avisa ao iniciar).
+- Organização: o que acontece a cada quadro agora está em `TrackingPipeline.kt`, sem Android.
+
+**Não incluído (de propósito):**
+- *Rastreadores prontos do OpenCV*: o `org.opencv:opencv:4.9.0` traz `TrackerMIL` (e GOTURN,
+  DaSiamRPN, Nano e Vit, que precisam de modelos), mas **não** traz KCF nem CSRT (ficam no
+  pacote contrib). O MIL não trata mudança de tamanho e costuma derivar, então o rastreio por
+  imagem com previsão faz o mesmo papel com mais controle.
+- *Rede neural (YOLO nano / MobileNet-SSD)*: precisa de um modelo treinado, que não dá para gerar
+  aqui, e deixa o APK maior e gasta mais bateria. É o próximo passo se isto não bastar.
+
 ## Versão 1.3.2: pintura acompanha o alvo durante o arrasto
 
 - **Corrigido:** durante o arrasto automático a pintura vermelha ficava parada no lugar antigo do
@@ -121,6 +157,8 @@ Ajustes (tela principal > 5. Modo mira):
 ## Ajustes
 
 - **Sensibilidade**: se não reconhece, baixe; se pinta coisa errada, suba.
+- **Nota para seguir**: quanto o alvo já achado precisa combinar para continuar sendo seguido
+  (menor que a Sensibilidade). Se o alvo some quando borra, baixe; se o app segue coisa errada, suba.
 - **Qualidade da captura**: menor = mais rápido, maior = mais preciso (vale ao iniciar).
 - **Ponto de partida**: onde o dedo começa o arrasto (em % da tela).
 - **Velocidade / pausa**: controlam a duração do arrasto e o intervalo entre eles.
@@ -134,5 +172,7 @@ Ajustes (tela principal > 5. Modo mira):
 - O reconhecimento é por comparação de imagem: tamanho muito diferente do original
   (zoom, outra resolução) reduz a precisão.
 - O arrasto é em linha reta e o app escolhe o alvo mais perto do ponto de partida.
+- A compensação do tremor mede a tela inteira: elementos parados no meio da tela (fora a mira
+  configurada) puxam a medida para zero. Com pouca textura, ela se abstém em vez de chutar.
 - Alguns apps e jogos bloqueiam captura de tela ou gestos de acessibilidade.
   Use apenas onde isso for permitido.

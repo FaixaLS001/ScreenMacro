@@ -218,9 +218,21 @@ class MainActivity : AppCompatActivity() {
         c3.addView(slider("Opacidade da pintura", 15, 75, MacroSettings.paintAlphaPct, "%") {
             MacroSettings.paintAlphaPct = it
         })
-        c3.addView(slider("Sensibilidade", 50, 98, (MacroSettings.threshold * 100).toInt(), "%") {
+        c3.addView(slider("Sensibilidade (nota para achar)", 50, 98, (MacroSettings.threshold * 100).toInt(), "%") {
             MacroSettings.threshold = it / 100f
         })
+        c3.addView(
+            slider("Nota para seguir", 30, 95, (MacroSettings.followThreshold * 100).toInt(), "%") {
+                MacroSettings.followThreshold = it / 100f
+            }
+        )
+        c3.addView(
+            note(
+                "Achar um alvo exige a Sensibilidade (alta). Para continuar seguindo um alvo já " +
+                    "achado, basta a Nota para seguir (menor), porque já se sabe onde ele estava. " +
+                    "Ela nunca passa da Sensibilidade."
+            )
+        )
         c3.addView(
             slider("Qualidade da captura (vale ao iniciar)", 30, 100, MacroSettings.scalePct, "%") {
                 MacroSettings.scalePct = it
@@ -381,6 +393,72 @@ class MainActivity : AppCompatActivity() {
             )
         )
 
+        // 7) Rastreio e desfoque
+        val c7 = card(7, "Rastreio e desfoque")
+        content.addView(c7)
+        c7.addView(
+            note(
+                "Ajudam quando o alvo borra ou treme. Se o alvo some por um instante, o app segue " +
+                    "a última posição (prevista pela velocidade) antes de desistir."
+            )
+        )
+        c7.addView(
+            slider("Segurar o alvo perdido", 0, 1500, MacroSettings.holdMs, " ms") {
+                MacroSettings.holdMs = it
+            }
+        )
+        c7.addView(
+            switch("Suavizar a posição (filtro de Kalman)", MacroSettings.kalmanOn) {
+                MacroSettings.kalmanOn = it
+            }
+        )
+        c7.addView(
+            slider("Quanto suavizar", 0, 100, MacroSettings.kalmanSmooth, "%") {
+                MacroSettings.kalmanSmooth = it
+            }
+        )
+        c7.addView(
+            note(
+                "Mais suave = menos tremor na posição, com um pouco mais de atraso nos alvos que " +
+                    "mudam de direção de repente."
+            )
+        )
+        c7.addView(
+            switch("Compensar o tremor da tela inteira", MacroSettings.shakeComp) {
+                MacroSettings.shakeComp = it
+            }
+        )
+        c7.addView(
+            note(
+                "Mede quanto a tela toda se deslocou entre dois quadros e corrige a posição dos " +
+                    "alvos, mesmo quando a detecção falha. Com a mira em modo mira, a zona de " +
+                    "travamento alarga enquanto a tela treme."
+            )
+        )
+        c7.addView(
+            switch("Versões borradas e de outro tamanho da imagem (vale ao iniciar)", MacroSettings.blurVariants) {
+                MacroSettings.blurVariants = it
+            }
+        )
+        c7.addView(
+            slider("Desfoque leve antes de comparar (vale ao iniciar)", 0, 40, MacroSettings.blurTenths, "") {
+                MacroSettings.blurTenths = it
+            }
+        )
+        c7.addView(note("O valor é em décimos de pixel (15 = 1,5 px). 0 = desligado."))
+        c7.addView(
+            slider("Tolerância da cor (vale ao iniciar)", 6, 30, MacroSettings.colorTol, "") {
+                MacroSettings.colorTol = it
+            }
+        )
+        c7.addView(
+            note(
+                "\"Achar por cor\" (em cada imagem, no cartão 2) usa a cor marcante da imagem " +
+                    "para achar candidatos; a imagem só confirma. Imagens sem cor marcante " +
+                    "(cinzas) ignoram essa opção."
+            )
+        )
+
         page.addView(ScrollView(this).apply { addView(content) }, LinearLayout.LayoutParams(MATCH, 0, 1f))
         page.addView(bottomBar())
         return page
@@ -524,6 +602,7 @@ class MainActivity : AppCompatActivity() {
         })
         mid.addView(colorRow)
         mid.addView(switch("Arrastar até ela", t.drag) { TemplateStore.setDrag(t.id, it) })
+        mid.addView(switch("Achar por cor", t.byColor) { TemplateStore.setByColor(t.id, it) })
         row.addView(mid)
 
         val right = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }

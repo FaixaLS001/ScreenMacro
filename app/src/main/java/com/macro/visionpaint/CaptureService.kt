@@ -10,6 +10,7 @@ import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.graphics.Bitmap
 import android.graphics.PixelFormat
+import android.graphics.Rect
 import android.hardware.display.DisplayManager
 import android.hardware.display.VirtualDisplay
 import android.media.ImageReader
@@ -34,6 +35,7 @@ import org.opencv.imgproc.Imgproc
 import kotlin.math.hypot
 import kotlin.math.max
 import kotlin.math.min
+import kotlin.math.roundToInt
 
 /**
  * Serviço principal: captura a tela (compartilhamento de tela), procura as imagens,
@@ -59,7 +61,6 @@ class CaptureService : Service() {
         var paused = false
 
         /** Intervalo mínimo entre varreduras completas enquanto há alvos sendo rastreados. */
-        private const val MIN_FULL_SCAN_MS = 500L
     }
 
     private val main = Handler(Looper.getMainLooper())
@@ -98,10 +99,10 @@ class CaptureService : Service() {
     private var stopping = false
 
     // Rastreio dos alvos (só a thread da análise mexe nestes): entre duas varreduras completas,
-    // procura os alvos já achados só ao redor de onde estavam, o que é bem mais rápido.
-    private var lastFound: List<Target> = emptyList()
-    private var lastFullScan = 0L
-    private var lastFullMs = 0L
+    // procura os alvos já achados só ao redor de onde a previsão diz que estão, o que é bem mais
+    // rápido. A previsão usa a velocidade do alvo (Kalman) e o deslocamento da tela inteira.
+    private var pipeline: TrackingPipeline? = null
+    private var lastShakeAmp = 0f
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -170,16 +171,25 @@ class CaptureService : Service() {
             return false
         }
 
-        val items = TemplateStore.list().map { it.id to TemplateStore.file(it.id) }
+        val items = TemplateStore.list().map { TplSource(it.id, TemplateStore.file(it.id), it.byColor) }
         scale = MacroSettings.scalePct / 100f
-        val det = Detector(scale)
+        val det = Detector(
+            scale,
+            blurSigma = MacroSettings.blurTenths / 10f,
+            useVariants = MacroSettings.blurVariants,
+            hueTol = MacroSettings.colorTol
+        )
         det.loadTemplates(items)
         if (det.templateCount() == 0) {
             toast("Adicione ao menos uma imagem válida primeiro.")
             det.release()
             return false
         }
+        if (det.colorless.isNotEmpty()) {
+            toast("${det.colorless.size} imagem(ns) sem cor marcante: \"Achar por cor\" foi ignorado nelas.")
+        }
         detector = det
+        pipeline = TrackingPipeline(det) { SystemClock.uptimeMillis() }
 
         val mpm = getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
         val proj = try {
@@ -316,6 +326,8 @@ class CaptureService : Service() {
         if (size.first == screenW && size.second == screenH) return
         screenW = size.first
         screenH = size.second
+        // A tela girou: posições e quadro anterior não valem mais.
+        pipeline?.reset()
         val capW = max(16, (screenW * scale).toInt())
         val capH = max(16, (screenH * scale).toInt())
         try {
@@ -346,11 +358,11 @@ class CaptureService : Service() {
             if (now - lastProcess < 60) return
             lastProcess = now
             if (paused) {
-                lastFound = emptyList()
+                pipeline?.reset()
                 return
             }
 
-            val det = detector ?: return
+            val pipe = pipeline ?: return
             val plane = image.planes[0]
             val pixelStride = plane.pixelStride
             val rowPadding = plane.rowStride - pixelStride * image.width
@@ -370,26 +382,38 @@ class CaptureService : Service() {
             cropped.release()
             rgba.release()
 
-            val threshold = MacroSettings.threshold
+            val tracked: List<Track>
+            try {
+                val acquire = MacroSettings.threshold
+                val params = TrackParams(
+                    acquire = acquire,
+                    follow = min(MacroSettings.followThreshold, acquire),
+                    holdMs = MacroSettings.holdMs.toLong(),
+                    kalmanOn = MacroSettings.kalmanOn,
+                    kalmanSmooth = MacroSettings.kalmanSmooth,
+                    shakeComp = MacroSettings.shakeComp,
+                    aimX = screenW * MacroSettings.aimXPm / 1000f * scale,
+                    aimY = screenH * MacroSettings.aimYPm / 1000f * scale
+                )
+                tracked = pipe.process(rgb, now, params)
+            } finally {
+                rgb.release()
+            }
+            lastShakeAmp = pipe.shakeAmplitude / scale
 
-            // Varredura completa só de tempos em tempos (ou quando o rastreio perde um alvo): ela
-            // é lenta e, enquanto roda, a pintura fica parada. O intervalo cresce junto com o
-            // tempo que a varredura leva, para ela ocupar no máximo uns 25% do tempo.
-            val fullInterval = max(MIN_FULL_SCAN_MS, 3 * lastFullMs)
-            val tracked = if (lastFound.isNotEmpty() && now - lastFullScan < fullInterval) {
-                det.track(rgb, threshold, lastFound)
-            } else {
-                null
+            // De pixels da captura para pixels reais da tela.
+            val inv = 1f / scale
+            val targets = tracked.map { t ->
+                Target(
+                    Rect(
+                        ((t.cx - t.w / 2f) * inv).roundToInt(),
+                        ((t.cy - t.h / 2f) * inv).roundToInt(),
+                        ((t.cx + t.w / 2f) * inv).roundToInt(),
+                        ((t.cy + t.h / 2f) * inv).roundToInt()
+                    ),
+                    t.score, t.tplId, t.missing
+                )
             }
-            val targets = tracked ?: run {
-                val t0 = SystemClock.uptimeMillis()
-                val all = det.detect(rgb, threshold)
-                lastFullScan = SystemClock.uptimeMillis()
-                lastFullMs = lastFullScan - t0
-                all
-            }
-            lastFound = targets
-            rgb.release()
             publish(targets)
         } catch (e: Throwable) {
             // Quadro inválido (ex.: durante a rotação): ignora e espera o próximo.
@@ -511,7 +535,10 @@ class CaptureService : Service() {
         val h = screenH.toFloat()
         val maxStep = 0.5f * min(w, h)
 
-        val step = aim.update(t.cx - mx, t.cy - my, t.tplId, now, canAct, maxStep)
+        // Com a tela tremendo, alarga a zona de travamento (até o dobro) para a mira não "caçar" um
+        // alvo que só tremeu. Quadro em que o alvo é só previsto não ensina nada ao controle.
+        val extraTol = if (MacroSettings.shakeComp) min(1.5f * lastShakeAmp, aim.tolerance) else 0f
+        val step = aim.update(t.cx - mx, t.cy - my, t.tplId, now, canAct, maxStep, extraTol, !t.predicted)
 
         if (aim.takeHint() && now - lastHintToast > 15000L) {
             lastHintToast = now
@@ -625,6 +652,7 @@ class CaptureService : Service() {
         }
         overlay = null
 
+        pipeline = null
         detector?.release()
         detector = null
 

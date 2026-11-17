@@ -73,7 +73,9 @@ class OverlayView(context: Context) : View(context) {
         for (p in items) {
             val r = p.target.rect
             fill.color = p.color
-            fill.alpha = (alphaPct * 255 / 100 * boost).toInt().coerceAtMost(255)
+            // Alvo só previsto (a imagem sumiu por um instante): pintura mais fraca.
+            val a = if (p.target.predicted) alphaPct / 2 else alphaPct
+            fill.alpha = (a * 255 / 100 * boost).toInt().coerceAtMost(255)
             stroke.color = p.color
             canvas.drawRect(
                 r.left.toFloat(), r.top.toFloat(), r.right.toFloat(), r.bottom.toFloat(), fill

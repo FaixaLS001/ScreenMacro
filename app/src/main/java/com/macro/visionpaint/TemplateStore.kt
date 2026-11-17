@@ -11,9 +11,10 @@ import java.io.FileOutputStream
 
 /**
  * Dados de uma imagem de referência.
- * [color] nulo = usa a cor padrão; [drag] = o dedo deve arrastar até esta imagem.
+ * [color] nulo = usa a cor padrão; [drag] = o dedo deve arrastar até esta imagem;
+ * [byColor] = também usa a cor marcante da imagem para achar o alvo (resiste melhor a borrão).
  */
-data class Tpl(val id: String, val color: Int?, val drag: Boolean)
+data class Tpl(val id: String, val color: Int?, val drag: Boolean, val byColor: Boolean = false)
 
 /**
  * Guarda as imagens de referência (os "modelos" que o app procura na tela)
@@ -78,7 +79,8 @@ object TemplateStore {
                     Tpl(
                         o.getString("id"),
                         if (o.has("color")) o.getInt("color") else null,
-                        o.optBoolean("drag", true)
+                        o.optBoolean("drag", true),
+                        o.optBoolean("byColor", false)
                     )
                 )
             }
@@ -107,6 +109,7 @@ object TemplateStore {
             val c = t.color
             if (c != null) o.put("color", c)
             o.put("drag", t.drag)
+            o.put("byColor", t.byColor)
             arr.put(o)
         }
         appCtx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
@@ -137,6 +140,9 @@ object TemplateStore {
 
     @Synchronized
     fun setDrag(id: String, drag: Boolean) = update(id) { it.copy(drag = drag) }
+
+    @Synchronized
+    fun setByColor(id: String, byColor: Boolean) = update(id) { it.copy(byColor = byColor) }
 
     private fun update(id: String, change: (Tpl) -> Tpl) {
         commit(state.list.map { if (it.id == id) change(it) else it })

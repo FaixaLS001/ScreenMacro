@@ -93,6 +93,9 @@ class AimController {
      * [ex], [ey]: erro (alvo - mira). [key]: identifica a imagem seguida (não aprende se mudar).
      * [canAct]: false quando não dá para arrastar agora (arrasto em curso, pausa, painel aberto);
      * nesse caso só atualiza o estado de travamento. [maxStep]: maior arrasto permitido (px).
+     * [extraTol]: folga (px) somada à zona de travamento enquanto a tela está tremendo, para a
+     * mira não "caçar" um alvo que só tremeu. [measured]: false quando a posição do alvo é só uma
+     * previsão (a imagem não foi vista neste quadro); aí o controle não aprende com ela.
      */
     fun update(
         ex: Float,
@@ -100,15 +103,22 @@ class AimController {
         key: String,
         nowMs: Long,
         canAct: Boolean,
-        maxStep: Float
+        maxStep: Float,
+        extraTol: Float = 0f,
+        measured: Boolean = true
     ): AimStep {
         val dist = hypot(ex, ey)
-        locked = if (locked) dist <= tolerance * UNLOCK_FACTOR else dist <= tolerance
+        val tol = tolerance + extraTol
+        locked = if (locked) dist <= tol * UNLOCK_FACTOR else dist <= tol
         if (!canAct) return AimStep(locked, 0f, 0f)
 
-        pending?.let { p ->
+        if (measured) {
+            pending?.let { p ->
+                pending = null
+                if (p.key == key && nowMs - p.t <= LEARN_MAX_AGE_MS) learnFrom(p, ex, ey)
+            }
+        } else {
             pending = null
-            if (p.key == key && nowMs - p.t <= LEARN_MAX_AGE_MS) learnFrom(p, ex, ey)
         }
         if (locked) return AimStep(true, 0f, 0f)
 
@@ -121,7 +131,7 @@ class AimController {
             gx *= k
             gy *= k
         }
-        pending = Pending(ex, ey, gx, gy, key, nowMs)
+        pending = if (measured) Pending(ex, ey, gx, gy, key, nowMs) else null
         return AimStep(false, if (invertX) -gx else gx, if (invertY) -gy else gy)
     }
 
