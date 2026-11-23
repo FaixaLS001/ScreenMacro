@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Vision Paint Macro</string>
+    <string name="accessibility_desc">Permite que o app execute toques e arrastos na tela para seguir os alvos reconhecidos.</string>
+</resources>
